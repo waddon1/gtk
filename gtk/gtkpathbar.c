@@ -132,7 +132,8 @@ static void gtk_path_bar_measure (GtkWidget *widget,
                                   int            *minimum_baseline,
                                   int            *natural_baseline);
 static void gtk_path_bar_size_allocate            (GtkWidget           *widget,
-                                                   const GtkAllocation *allocation,
+                                                   int                  width,
+                                                   int                  height,
                                                    int                  baseline);
 static void gtk_path_bar_add                      (GtkContainer     *container,
 						   GtkWidget        *widget);
@@ -150,17 +151,17 @@ static gboolean gtk_path_bar_slider_down_defocus  (GtkWidget        *widget,
 						   GdkEventButton   *event,
 						   GtkPathBar       *path_bar);
 static void gtk_path_bar_style_updated            (GtkWidget        *widget);
-static void gtk_path_bar_display_changed          (GtkWidget        *widget,
-						   GdkDisplay       *previous_display);
+static void gtk_path_bar_root                     (GtkWidget        *widget);
+static void gtk_path_bar_unroot                   (GtkWidget        *widget);
 static void gtk_path_bar_check_icon_theme         (GtkPathBar       *path_bar);
 static void gtk_path_bar_update_button_appearance (GtkPathBar       *path_bar,
 						   ButtonData       *button_data,
 						   gboolean          current_dir);
 
-static void gtk_path_bar_scroll_controller_scroll (GtkEventControllerScroll *scroll,
-                                                   gdouble                   dx,
-                                                   gdouble                   dy,
-                                                   GtkPathBar               *path_bar);
+static gboolean gtk_path_bar_scroll_controller_scroll (GtkEventControllerScroll *scroll,
+                                                       gdouble                   dx,
+                                                       gdouble                   dy,
+                                                       GtkPathBar               *path_bar);
 
 static void
 add_cancellable (GtkPathBar   *path_bar,
@@ -238,8 +239,6 @@ gtk_path_bar_init (GtkPathBar *path_bar)
   g_signal_connect_swapped (priv->down_slider_button, "clicked",
 			    G_CALLBACK (gtk_path_bar_scroll_down), path_bar);
 
-  gtk_widget_set_has_surface (GTK_WIDGET (path_bar), FALSE);
-
   context = gtk_widget_get_style_context (GTK_WIDGET (path_bar));
   gtk_style_context_add_class (context, "path-bar");
   gtk_style_context_add_class (context, GTK_STYLE_CLASS_LINKED);
@@ -272,7 +271,8 @@ gtk_path_bar_class_init (GtkPathBarClass *path_bar_class)
   widget_class->measure = gtk_path_bar_measure;
   widget_class->size_allocate = gtk_path_bar_size_allocate;
   widget_class->style_updated = gtk_path_bar_style_updated;
-  widget_class->display_changed = gtk_path_bar_display_changed;
+  widget_class->root = gtk_path_bar_root;
+  widget_class->unroot = gtk_path_bar_unroot;
 
   container_class->add = gtk_path_bar_add;
   container_class->forall = gtk_path_bar_forall;
@@ -485,9 +485,10 @@ gtk_path_bar_update_slider_buttons (GtkPathBar *path_bar)
 /* This is a tad complicated
  */
 static void
-gtk_path_bar_size_allocate (GtkWidget           *widget,
-                            const GtkAllocation *allocation,
-                            int                  baseline)
+gtk_path_bar_size_allocate (GtkWidget *widget,
+                            int        widget_width,
+                            int        widget_height,
+                            int        baseline)
 {
   GtkPathBar *path_bar = GTK_PATH_BAR (widget);
   GtkPathBarPrivate *priv = gtk_path_bar_get_instance_private (path_bar);
@@ -507,7 +508,7 @@ gtk_path_bar_size_allocate (GtkWidget           *widget,
     return;
 
   direction = gtk_widget_get_direction (widget);
-  allocation_width = allocation->width;
+  allocation_width = widget_width;
 
   /* First, we check to see if we need the scrollbars. */
   if (priv->fake_root)
@@ -593,21 +594,21 @@ gtk_path_bar_size_allocate (GtkWidget           *widget,
     }
 
   /* Now, we allocate space to the buttons */
-  child_allocation.y = allocation->y;
-  child_allocation.height = allocation->height;
+  child_allocation.y = 0;
+  child_allocation.height = widget_height;
 
   if (direction == GTK_TEXT_DIR_RTL)
     {
-      child_allocation.x = allocation->x + allocation->width;
+      child_allocation.x = widget_width;
       if (need_sliders || priv->fake_root)
 	{
 	  child_allocation.x -= priv->slider_width;
-	  up_slider_offset = allocation->width - priv->slider_width;
+	  up_slider_offset = widget_width - priv->slider_width;
 	}
     }
   else
     {
-      child_allocation.x = allocation->x;
+      child_allocation.x = 0;
       if (need_sliders || priv->fake_root)
 	{
 	  up_slider_offset = 0;
@@ -659,7 +660,7 @@ gtk_path_bar_size_allocate (GtkWidget           *widget,
 
       if (direction == GTK_TEXT_DIR_RTL)
         {
-          down_slider_offset = child_allocation.x - allocation->x - priv->slider_width;
+          down_slider_offset = child_allocation.x - priv->slider_width;
         }
       else
         {
@@ -683,7 +684,7 @@ gtk_path_bar_size_allocate (GtkWidget           *widget,
   if (need_sliders || priv->fake_root)
     {
       child_allocation.width = priv->slider_width;
-      child_allocation.x = up_slider_offset + allocation->x;
+      child_allocation.x = up_slider_offset;
       gtk_widget_size_allocate (priv->up_slider_button,
                                 &child_allocation,
                                 -1);
@@ -702,7 +703,7 @@ gtk_path_bar_size_allocate (GtkWidget           *widget,
   if (need_sliders)
     {
       child_allocation.width = priv->slider_width;
-      child_allocation.x = down_slider_offset + allocation->x;
+      child_allocation.x = down_slider_offset;
       
       gtk_widget_size_allocate (priv->down_slider_button,
                                 &child_allocation,
@@ -727,20 +728,22 @@ gtk_path_bar_style_updated (GtkWidget *widget)
 }
 
 static void
-gtk_path_bar_display_changed (GtkWidget  *widget,
-			      GdkDisplay *previous_display)
+gtk_path_bar_root (GtkWidget *widget)
 {
-  if (GTK_WIDGET_CLASS (gtk_path_bar_parent_class)->display_changed)
-    GTK_WIDGET_CLASS (gtk_path_bar_parent_class)->display_changed (widget, previous_display);
-
-  /* We might nave a new settings, so we remove the old one */
-  if (previous_display)
-    remove_settings_signal (GTK_PATH_BAR (widget), previous_display);
+  GTK_WIDGET_CLASS (gtk_path_bar_parent_class)->root (widget);
 
   gtk_path_bar_check_icon_theme (GTK_PATH_BAR (widget));
 }
 
 static void
+gtk_path_bar_unroot (GtkWidget *widget)
+{
+  remove_settings_signal (GTK_PATH_BAR (widget), gtk_widget_get_display (widget));
+
+  GTK_WIDGET_CLASS (gtk_path_bar_parent_class)->unroot (widget);
+}
+
+static gboolean
 gtk_path_bar_scroll_controller_scroll (GtkEventControllerScroll *scroll,
                                        gdouble                   dx,
                                        gdouble                   dy,
@@ -750,6 +753,8 @@ gtk_path_bar_scroll_controller_scroll (GtkEventControllerScroll *scroll,
     gtk_path_bar_scroll_down (path_bar);
   else if (dy < 0)
     gtk_path_bar_scroll_up (path_bar);
+
+  return GDK_EVENT_STOP;
 }
 
 static void
@@ -1358,8 +1363,8 @@ make_directory_button (GtkPathBar  *path_bar,
       button_data->image = gtk_image_new ();
       button_data->label = gtk_label_new (NULL);
       child = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-      gtk_box_pack_start (GTK_BOX (child), button_data->image);
-      gtk_box_pack_start (GTK_BOX (child), button_data->label);
+      gtk_container_add (GTK_CONTAINER (child), button_data->image);
+      gtk_container_add (GTK_CONTAINER (child), button_data->label);
       break;
     case NORMAL_BUTTON:
     default:

@@ -27,7 +27,10 @@
 
 #define __GTK_H_INSIDE__
 
+#include <gtk/css/gtkcss.h>
 #include <gdk/gdk.h>
+#include <gsk/gsk.h>
+
 #include <gtk/gtkaboutdialog.h>
 #include <gtk/gtkaccelgroup.h>
 #include <gtk/gtkaccellabel.h>
@@ -44,10 +47,11 @@
 #include <gtk/gtkapplicationwindow.h>
 #include <gtk/gtkaspectframe.h>
 #include <gtk/gtkassistant.h>
-#include <gtk/gtkbbox.h>
 #include <gtk/gtkbin.h>
+#include <gtk/gtkbinlayout.h>
 #include <gtk/gtkbindings.h>
 #include <gtk/gtkborder.h>
+#include <gtk/gtkboxlayout.h>
 #include <gtk/gtkbox.h>
 #include <gtk/gtkbuildable.h>
 #include <gtk/gtkbuilder.h>
@@ -69,6 +73,7 @@
 #include <gtk/gtkcellrenderertoggle.h>
 #include <gtk/gtkcellview.h>
 #include <gtk/gtkcenterbox.h>
+#include <gtk/gtkcenterlayout.h>
 #include <gtk/gtkcheckbutton.h>
 #include <gtk/gtkcheckmenuitem.h>
 #include <gtk/gtkcolorbutton.h>
@@ -78,9 +83,11 @@
 #include <gtk/gtkcolorutils.h>
 #include <gtk/gtkcombobox.h>
 #include <gtk/gtkcomboboxtext.h>
+#include <gtk/gtkconstraintlayout.h>
+#include <gtk/gtkconstraint.h>
 #include <gtk/gtkcontainer.h>
 #include <gtk/gtkcssprovider.h>
-#include <gtk/gtkcsssection.h>
+#include <gtk/gtkcustomlayout.h>
 #include <gtk/gtkdebug.h>
 #include <gtk/gtkdialog.h>
 #include <gtk/gtkdnd.h>
@@ -94,16 +101,20 @@
 #include <gtk/gtkenums.h>
 #include <gtk/gtkeventcontroller.h>
 #include <gtk/gtkeventcontrollerkey.h>
+#include <gtk/gtkeventcontrollerlegacy.h>
 #include <gtk/gtkeventcontrollermotion.h>
 #include <gtk/gtkeventcontrollerscroll.h>
 #include <gtk/gtkexpander.h>
 #include <gtk/gtkfixed.h>
+#include <gtk/gtkfixedlayout.h>
 #include <gtk/gtkfilechooser.h>
 #include <gtk/gtkfilechooserbutton.h>
 #include <gtk/gtkfilechooserdialog.h>
 #include <gtk/gtkfilechoosernative.h>
 #include <gtk/gtkfilechooserwidget.h>
 #include <gtk/gtkfilefilter.h>
+#include <gtk/gtkfilterlistmodel.h>
+#include <gtk/gtkflattenlistmodel.h>
 #include <gtk/gtkflowbox.h>
 #include <gtk/gtkfontbutton.h>
 #include <gtk/gtkfontchooser.h>
@@ -111,9 +122,9 @@
 #include <gtk/gtkfontchooserwidget.h>
 #include <gtk/gtkframe.h>
 #include <gtk/gtkgesture.h>
+#include <gtk/gtkgestureclick.h>
 #include <gtk/gtkgesturedrag.h>
 #include <gtk/gtkgesturelongpress.h>
-#include <gtk/gtkgesturemultipress.h>
 #include <gtk/gtkgesturepan.h>
 #include <gtk/gtkgesturerotate.h>
 #include <gtk/gtkgesturesingle.h>
@@ -122,6 +133,7 @@
 #include <gtk/gtkgesturezoom.h>
 #include <gtk/gtkglarea.h>
 #include <gtk/gtkgrid.h>
+#include <gtk/gtkgridlayout.h>
 #include <gtk/gtkheaderbar.h>
 #include <gtk/gtkicontheme.h>
 #include <gtk/gtkiconview.h>
@@ -130,15 +142,16 @@
 #include <gtk/gtkimcontextsimple.h>
 #include <gtk/gtkimmulticontext.h>
 #include <gtk/gtkinfobar.h>
-#include <gtk/gtkinvisible.h>
 #include <gtk/gtklabel.h>
-#include <gtk/gtklayout.h>
+#include <gtk/gtklayoutmanager.h>
+#include <gtk/gtklayoutchild.h>
 #include <gtk/gtklevelbar.h>
 #include <gtk/gtklinkbutton.h>
 #include <gtk/gtklistbox.h>
 #include <gtk/gtkliststore.h>
 #include <gtk/gtklockbutton.h>
 #include <gtk/gtkmain.h>
+#include <gtk/gtkmaplistmodel.h>
 #include <gtk/gtkmediacontrols.h>
 #include <gtk/gtkmediafile.h>
 #include <gtk/gtkmediastream.h>
@@ -151,17 +164,21 @@
 #include <gtk/gtkmessagedialog.h>
 #include <gtk/gtkmodelbutton.h>
 #include <gtk/gtkmountoperation.h>
+#include <gtk/gtknative.h>
 #include <gtk/gtknativedialog.h>
+#include <gtk/gtknoselection.h>
 #include <gtk/gtknotebook.h>
 #include <gtk/gtkorientable.h>
 #include <gtk/gtkoverlay.h>
 #include <gtk/gtkpadcontroller.h>
 #include <gtk/gtkpagesetup.h>
-#include <gtk/gtkpapersize.h>
 #include <gtk/gtkpaned.h>
+#include <gtk/gtkpapersize.h>
+#include <gtk/gtkpasswordentry.h>
 #include <gtk/gtkpicture.h>
 #include <gtk/gtkpopover.h>
 #include <gtk/gtkpopovermenu.h>
+#include <gtk/gtkpopovermenubar.h>
 #include <gtk/gtkprintcontext.h>
 #include <gtk/gtkprintoperation.h>
 #include <gtk/gtkprintoperationpreview.h>
@@ -174,6 +191,7 @@
 #include <gtk/gtkrecentmanager.h>
 #include <gtk/gtkrender.h>
 #include <gtk/gtkrevealer.h>
+#include <gtk/gtkroot.h>
 #include <gtk/gtkscale.h>
 #include <gtk/gtkscalebutton.h>
 #include <gtk/gtkscrollable.h>
@@ -182,6 +200,7 @@
 #include <gtk/gtksearchbar.h>
 #include <gtk/gtksearchentry.h>
 #include <gtk/gtkselection.h>
+#include <gtk/gtkselectionmodel.h>
 #include <gtk/gtkseparator.h>
 #include <gtk/gtkseparatormenuitem.h>
 #include <gtk/gtkseparatortoolitem.h>
@@ -192,7 +211,10 @@
 #include <gtk/gtkshortcutsshortcut.h>
 #include <gtk/gtkshortcutswindow.h>
 #include <gtk/gtkshow.h>
+#include <gtk/gtksingleselection.h>
+#include <gtk/gtkslicelistmodel.h>
 #include <gtk/gtksnapshot.h>
+#include <gtk/gtksortlistmodel.h>
 #include <gtk/gtkstacksidebar.h>
 #include <gtk/gtksizegroup.h>
 #include <gtk/gtksizerequest.h>
@@ -204,6 +226,7 @@
 #include <gtk/gtkstylecontext.h>
 #include <gtk/gtkstyleprovider.h>
 #include <gtk/gtkswitch.h>
+#include <gtk/gtktext.h>
 #include <gtk/gtktextbuffer.h>
 #include <gtk/gtktextchild.h>
 #include <gtk/gtktextiter.h>
@@ -220,6 +243,7 @@
 #include <gtk/gtktooltip.h>
 #include <gtk/gtktestutils.h>
 #include <gtk/gtktreednd.h>
+#include <gtk/gtktreelistmodel.h>
 #include <gtk/gtktreemodel.h>
 #include <gtk/gtktreemodelfilter.h>
 #include <gtk/gtktreemodelsort.h>

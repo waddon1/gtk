@@ -23,11 +23,13 @@
 #include "config.h"
 #include "gtkglarea.h"
 #include "gtkintl.h"
+#include "gtkmarshalers.h"
 #include "gtkstylecontext.h"
 #include "gtkmarshalers.h"
 #include "gtkprivate.h"
 #include "gtkrender.h"
 #include "gtksnapshot.h"
+#include "gtknative.h"
 
 #include <epoxy/gl.h>
 
@@ -312,7 +314,7 @@ gtk_gl_area_real_create_context (GtkGLArea *area)
   GError *error = NULL;
   GdkGLContext *context;
 
-  context = gdk_surface_create_gl_context (gtk_widget_get_surface (widget), &error);
+  context = gdk_surface_create_gl_context (gtk_native_get_surface (gtk_widget_get_native (widget)), &error);
   if (error != NULL)
     {
       gtk_gl_area_set_error (area, error);
@@ -630,14 +632,15 @@ gtk_gl_area_unrealize (GtkWidget *widget)
 }
 
 static void
-gtk_gl_area_size_allocate (GtkWidget           *widget,
-                           const GtkAllocation *allocation,
-                           int                  baseline)
+gtk_gl_area_size_allocate (GtkWidget *widget,
+                           int        width,
+                           int        height,
+                           int        baseline)
 {
   GtkGLArea *area = GTK_GL_AREA (widget);
   GtkGLAreaPrivate *priv = gtk_gl_area_get_instance_private (area);
 
-  GTK_WIDGET_CLASS (gtk_gl_area_parent_class)->size_allocate (widget, allocation, baseline);
+  GTK_WIDGET_CLASS (gtk_gl_area_parent_class)->size_allocate (widget, width, height, baseline);
 
   if (gtk_widget_get_realized (widget))
     priv->needs_resize = TRUE;
@@ -894,9 +897,12 @@ gtk_gl_area_class_init (GtkGLAreaClass *klass)
                   G_SIGNAL_RUN_LAST,
                   G_STRUCT_OFFSET (GtkGLAreaClass, render),
                   _gtk_boolean_handled_accumulator, NULL,
-                  NULL,
+                  _gtk_marshal_BOOLEAN__OBJECT,
                   G_TYPE_BOOLEAN, 1,
                   GDK_TYPE_GL_CONTEXT);
+  g_signal_set_va_marshaller (area_signals[RENDER],
+                              G_TYPE_FROM_CLASS (klass),
+                              _gtk_marshal_BOOLEAN__OBJECTv);
 
   /**
    * GtkGLArea::resize:
@@ -922,6 +928,9 @@ gtk_gl_area_class_init (GtkGLAreaClass *klass)
                   NULL, NULL,
                   _gtk_marshal_VOID__INT_INT,
                   G_TYPE_NONE, 2, G_TYPE_INT, G_TYPE_INT);
+  g_signal_set_va_marshaller (area_signals[RESIZE],
+                              G_TYPE_FROM_CLASS (klass),
+                              _gtk_marshal_VOID__INT_INTv);
 
   /**
    * GtkGLArea::create-context:
@@ -949,14 +958,15 @@ gtk_gl_area_class_init (GtkGLAreaClass *klass)
                   create_context_accumulator, NULL,
                   _gtk_marshal_OBJECT__VOID,
                   GDK_TYPE_GL_CONTEXT, 0);
+  g_signal_set_va_marshaller (area_signals[CREATE_CONTEXT],
+                              G_TYPE_FROM_CLASS (klass),
+                              _gtk_marshal_OBJECT__VOIDv);
 }
 
 static void
 gtk_gl_area_init (GtkGLArea *area)
 {
   GtkGLAreaPrivate *priv = gtk_gl_area_get_instance_private (area);
-
-  gtk_widget_set_has_surface (GTK_WIDGET (area), FALSE);
 
   priv->auto_render = TRUE;
   priv->needs_render = TRUE;

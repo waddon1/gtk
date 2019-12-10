@@ -153,9 +153,10 @@ static void gtk_icon_view_measure (GtkWidget *widget,
                                    int            *natural,
                                    int            *minimum_baseline,
                                    int            *natural_baseline);
-static void             gtk_icon_view_size_allocate             (GtkWidget           *widget,
-                                                                 const GtkAllocation *allocation,
-                                                                 int                  baseline);
+static void             gtk_icon_view_size_allocate             (GtkWidget          *widget,
+                                                                 int                 width,
+                                                                 int                 height,
+                                                                 int                 baseline);
 static void             gtk_icon_view_snapshot                  (GtkWidget          *widget,
                                                                  GtkSnapshot        *snapshot);
 static void             gtk_icon_view_motion                    (GtkEventController *controller,
@@ -163,13 +164,15 @@ static void             gtk_icon_view_motion                    (GtkEventControl
                                                                  double              y,
                                                                  gpointer            user_data);
 static void             gtk_icon_view_leave                     (GtkEventController *controller,
+                                                                 GdkCrossingMode     mode,
+                                                                 GdkNotifyType       detail,
                                                                  gpointer            user_data);
-static void             gtk_icon_view_button_press              (GtkGestureMultiPress *gesture,
+static void             gtk_icon_view_button_press              (GtkGestureClick *gesture,
                                                                  int                   n_press,
                                                                  double                x,
                                                                  double                y,
                                                                  gpointer              user_data);
-static void             gtk_icon_view_button_release            (GtkGestureMultiPress *gesture,
+static void             gtk_icon_view_button_release            (GtkGestureClick *gesture,
                                                                  int                   n_press,
                                                                  double                x,
                                                                  double                y,
@@ -309,18 +312,19 @@ static void     remove_scroll_timeout            (GtkIconView *icon_view);
 
 /* GtkBuildable */
 static GtkBuildableIface *parent_buildable_iface;
-static void     gtk_icon_view_buildable_init             (GtkBuildableIface *iface);
-static gboolean gtk_icon_view_buildable_custom_tag_start (GtkBuildable  *buildable,
-							  GtkBuilder    *builder,
-							  GObject       *child,
-							  const gchar   *tagname,
-							  GMarkupParser *parser,
-							  gpointer      *data);
-static void     gtk_icon_view_buildable_custom_tag_end   (GtkBuildable  *buildable,
-							  GtkBuilder    *builder,
-							  GObject       *child,
-							  const gchar   *tagname,
-							  gpointer      *data);
+static void     gtk_icon_view_buildable_init             (GtkBuildableIface  *iface);
+static gboolean gtk_icon_view_buildable_custom_tag_start (GtkBuildable       *buildable,
+                                                          GtkBuilder         *builder,
+                                                          GObject            *child,
+                                                          const gchar        *tagname,
+                                                          GtkBuildableParser *parser,
+                                                          gpointer           *data);
+static void     gtk_icon_view_buildable_custom_tag_end   (GtkBuildable       *buildable,
+                                                          GtkBuilder         *builder,
+                                                          GObject            *child,
+                                                          const gchar        *tagname,
+                                                          gpointer            data);
+
 
 static guint icon_view_signals[LAST_SIGNAL] = { 0 };
 
@@ -646,7 +650,7 @@ gtk_icon_view_class_init (GtkIconViewClass *klass)
 		  G_SIGNAL_RUN_LAST,
 		  G_STRUCT_OFFSET (GtkIconViewClass, item_activated),
 		  NULL, NULL,
-		  g_cclosure_marshal_VOID__BOXED,
+		  NULL,
 		  G_TYPE_NONE, 1,
 		  GTK_TYPE_TREE_PATH);
 
@@ -663,7 +667,7 @@ gtk_icon_view_class_init (GtkIconViewClass *klass)
 		  G_SIGNAL_RUN_FIRST,
 		  G_STRUCT_OFFSET (GtkIconViewClass, selection_changed),
 		  NULL, NULL,
-		  g_cclosure_marshal_VOID__VOID,
+		  NULL,
 		  G_TYPE_NONE, 0);
   
   /**
@@ -685,7 +689,7 @@ gtk_icon_view_class_init (GtkIconViewClass *klass)
 		  G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION,
 		  G_STRUCT_OFFSET (GtkIconViewClass, select_all),
 		  NULL, NULL,
-		  g_cclosure_marshal_VOID__VOID,
+		  NULL,
 		  G_TYPE_NONE, 0);
   
   /**
@@ -707,7 +711,7 @@ gtk_icon_view_class_init (GtkIconViewClass *klass)
 		  G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION,
 		  G_STRUCT_OFFSET (GtkIconViewClass, unselect_all),
 		  NULL, NULL,
-		  g_cclosure_marshal_VOID__VOID,
+		  NULL,
 		  G_TYPE_NONE, 0);
 
   /**
@@ -730,7 +734,7 @@ gtk_icon_view_class_init (GtkIconViewClass *klass)
 		  G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION,
 		  G_STRUCT_OFFSET (GtkIconViewClass, select_cursor_item),
 		  NULL, NULL,
-		  g_cclosure_marshal_VOID__VOID,
+		  NULL,
 		  G_TYPE_NONE, 0);
 
   /**
@@ -754,7 +758,7 @@ gtk_icon_view_class_init (GtkIconViewClass *klass)
 		  G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION,
 		  G_STRUCT_OFFSET (GtkIconViewClass, toggle_cursor_item),
 		  NULL, NULL,
-		  g_cclosure_marshal_VOID__VOID,
+		  NULL,
 		  G_TYPE_NONE, 0);
 
   /**
@@ -779,6 +783,9 @@ gtk_icon_view_class_init (GtkIconViewClass *klass)
 		  NULL, NULL,
 		  _gtk_marshal_BOOLEAN__VOID,
 		  G_TYPE_BOOLEAN, 0);
+  g_signal_set_va_marshaller (icon_view_signals[ACTIVATE_CURSOR_ITEM],
+                              G_TYPE_FROM_CLASS (klass),
+                              _gtk_marshal_BOOLEAN__VOIDv);
   
   /**
    * GtkIconView::move-cursor:
@@ -811,6 +818,9 @@ gtk_icon_view_class_init (GtkIconViewClass *klass)
 		  G_TYPE_BOOLEAN, 2,
 		  GTK_TYPE_MOVEMENT_STEP,
 		  G_TYPE_INT);
+  g_signal_set_va_marshaller (icon_view_signals[MOVE_CURSOR],
+                              G_TYPE_FROM_CLASS (klass),
+                              _gtk_marshal_BOOLEAN__ENUM_INTv);
 
   /* Key bindings */
   gtk_binding_entry_add_signal (binding_set, GDK_KEY_a, GDK_CONTROL_MASK, 
@@ -933,8 +943,8 @@ gtk_icon_view_init (GtkIconView *icon_view)
   icon_view->priv->mouse_x = -1;
   icon_view->priv->mouse_y = -1;
 
-  gtk_widget_set_has_surface (GTK_WIDGET (icon_view), FALSE);
   gtk_widget_set_can_focus (GTK_WIDGET (icon_view), TRUE);
+  gtk_widget_set_overflow (GTK_WIDGET (icon_view), GTK_OVERFLOW_HIDDEN);
 
   icon_view->priv->item_orientation = GTK_ORIENTATION_VERTICAL;
 
@@ -955,7 +965,7 @@ gtk_icon_view_init (GtkIconView *icon_view)
   gtk_style_context_add_class (gtk_widget_get_style_context (GTK_WIDGET (icon_view)),
                                GTK_STYLE_CLASS_VIEW);
 
-  gesture = gtk_gesture_multi_press_new ();
+  gesture = gtk_gesture_click_new ();
   g_signal_connect (gesture, "pressed", G_CALLBACK (gtk_icon_view_button_press),
                     icon_view);
   g_signal_connect (gesture, "released", G_CALLBACK (gtk_icon_view_button_release),
@@ -1616,9 +1626,10 @@ gtk_icon_view_allocate_children (GtkIconView *icon_view)
 }
 
 static void
-gtk_icon_view_size_allocate (GtkWidget           *widget,
-                             const GtkAllocation *allocation,
-                             int                  baseline)
+gtk_icon_view_size_allocate (GtkWidget *widget,
+                             int        width,
+                             int        height,
+                             int        baseline)
 {
   GtkIconView *icon_view = GTK_ICON_VIEW (widget);
 
@@ -1665,22 +1676,19 @@ gtk_icon_view_snapshot (GtkWidget   *widget,
   GtkIconViewItem *dest_item = NULL;
   GtkStyleContext *context;
   int width, height;
+  double offset_x, offset_y;
 
   icon_view = GTK_ICON_VIEW (widget);
 
   context = gtk_widget_get_style_context (widget);
-
   width = gtk_widget_get_width (widget);
   height = gtk_widget_get_height (widget);
-  gtk_snapshot_push_clip (snapshot,
-                          &GRAPHENE_RECT_INIT (
-                              0, 0,
-                              width, height
-                          ));
 
-  gtk_snapshot_offset (snapshot,
-                       - gtk_adjustment_get_value (icon_view->priv->hadjustment),
-                       - gtk_adjustment_get_value (icon_view->priv->vadjustment));
+  offset_x = gtk_adjustment_get_value (icon_view->priv->hadjustment);
+  offset_y = gtk_adjustment_get_value (icon_view->priv->vadjustment);
+
+  gtk_snapshot_save (snapshot);
+  gtk_snapshot_translate (snapshot, &GRAPHENE_POINT_INIT (- offset_x, - offset_y));
 
   gtk_icon_view_get_drag_dest_item (icon_view, &path, &dest_pos);
 
@@ -1703,7 +1711,8 @@ gtk_icon_view_snapshot (GtkWidget   *widget,
                           item->cell_area.width  + icon_view->priv->item_padding * 2,
                           item->cell_area.height + icon_view->priv->item_padding * 2);
 
-      if (gdk_rectangle_intersect (&item->cell_area, &(GdkRectangle) { 0, 0, width, height }, NULL))
+      if (gdk_rectangle_intersect (&item->cell_area,
+                                   &(GdkRectangle) { offset_x, offset_y, width, height }, NULL))
         {
           gtk_icon_view_snapshot_item (icon_view, snapshot, item,
                                        item->cell_area.x, item->cell_area.y,
@@ -1760,7 +1769,7 @@ gtk_icon_view_snapshot (GtkWidget   *widget,
   if (icon_view->priv->doing_rubberband)
     gtk_icon_view_snapshot_rubberband (icon_view, snapshot);
 
-  gtk_snapshot_pop (snapshot);
+  gtk_snapshot_restore (snapshot);
 
   GTK_WIDGET_CLASS (gtk_icon_view_parent_class)->snapshot (widget, snapshot);
 }
@@ -1836,7 +1845,7 @@ gtk_icon_view_motion (GtkEventController *controller,
 
 	  if (icon_view->priv->scroll_timeout_id == 0) {
 	    icon_view->priv->scroll_timeout_id = g_timeout_add (30, rubberband_scroll_timeout, icon_view);
-	    g_source_set_name_by_id (icon_view->priv->scroll_timeout_id, "[gtk+] rubberband_scroll_timeout");
+	    g_source_set_name_by_id (icon_view->priv->scroll_timeout_id, "[gtk] rubberband_scroll_timeout");
 	  }
  	}
       else
@@ -1874,6 +1883,8 @@ gtk_icon_view_motion (GtkEventController *controller,
 
 static void
 gtk_icon_view_leave (GtkEventController *controller,
+                     GdkCrossingMode     mode,
+                     GdkNotifyType       detail,
                      gpointer            user_data)
 {
   GtkIconView *icon_view;
@@ -2097,11 +2108,11 @@ gtk_icon_view_get_cursor (GtkIconView      *icon_view,
 }
 
 static void
-gtk_icon_view_button_press (GtkGestureMultiPress *gesture,
-                            int                   n_press,
-                            double                x,
-                            double                y,
-                            gpointer              user_data)
+gtk_icon_view_button_press (GtkGestureClick *gesture,
+                            int              n_press,
+                            double           x,
+                            double           y,
+                            gpointer         user_data)
 {
   GtkIconView *icon_view = user_data;
   GtkWidget *widget = GTK_WIDGET (icon_view);
@@ -2227,7 +2238,7 @@ gtk_icon_view_button_press (GtkGestureMultiPress *gesture,
 					       x, y);
 	}
 
-      /* don't draw keyboard focus around an clicked-on item */
+      /* don't draw keyboard focus around a clicked-on item */
       icon_view->priv->draw_focus = FALSE;
     }
 
@@ -2267,11 +2278,11 @@ button_event_modifies_selection (const GdkEventButton *event)
 }
 
 static void
-gtk_icon_view_button_release (GtkGestureMultiPress *gesture,
-                              int                   n_press,
-                              double                x,
-                              double                y,
-                              gpointer              user_data)
+gtk_icon_view_button_release (GtkGestureClick *gesture,
+                              int              n_press,
+                              double           x,
+                              double           y,
+                              gpointer         user_data)
 {
   GtkIconView *icon_view = user_data;
   int button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (gesture));
@@ -3689,7 +3700,7 @@ gtk_icon_view_move_cursor_up_down (GtkIconView *icon_view,
     {
       if (!gtk_widget_keynav_failed (GTK_WIDGET (icon_view), direction))
         {
-          GtkWidget *toplevel = gtk_widget_get_toplevel (GTK_WIDGET (icon_view));
+          GtkWidget *toplevel = GTK_WIDGET (gtk_widget_get_root (GTK_WIDGET (icon_view)));
           if (toplevel)
             gtk_widget_child_focus (toplevel,
                                     direction == GTK_DIR_UP ?
@@ -3841,7 +3852,7 @@ gtk_icon_view_move_cursor_left_right (GtkIconView *icon_view,
     {
       if (!gtk_widget_keynav_failed (GTK_WIDGET (icon_view), direction))
         {
-          GtkWidget *toplevel = gtk_widget_get_toplevel (GTK_WIDGET (icon_view));
+          GtkWidget *toplevel = GTK_WIDGET (gtk_widget_get_root (GTK_WIDGET (icon_view)));
           if (toplevel)
             gtk_widget_child_focus (toplevel,
                                     direction == GTK_DIR_LEFT ?
@@ -4370,7 +4381,7 @@ gtk_icon_view_set_tooltip_cell (GtkIconView     *icon_view,
  * @model, @path and @iter which have been provided will be set to point to
  * that row and the corresponding model.
  *
- * Returns: whether or not the given tooltip context points to a item
+ * Returns: whether or not the given tooltip context points to an item
  */
 gboolean
 gtk_icon_view_get_tooltip_context (GtkIconView   *icon_view,
@@ -6251,7 +6262,7 @@ gtk_icon_view_drag_motion (GtkWidget *widget,
       if (icon_view->priv->scroll_timeout_id == 0)
 	{
 	  icon_view->priv->scroll_timeout_id = g_timeout_add (50, drag_scroll_timeout, icon_view);
-	  g_source_set_name_by_id (icon_view->priv->scroll_timeout_id, "[gtk+] drag_scroll_timeout");
+	  g_source_set_name_by_id (icon_view->priv->scroll_timeout_id, "[gtk] drag_scroll_timeout");
 	}
 
       if (target == g_intern_static_string ("GTK_TREE_MODEL_ROW"))
@@ -6846,12 +6857,12 @@ gtk_icon_view_get_activate_on_single_click (GtkIconView *icon_view)
 }
 
 static gboolean
-gtk_icon_view_buildable_custom_tag_start (GtkBuildable  *buildable,
-                                          GtkBuilder    *builder,
-                                          GObject       *child,
-                                          const gchar   *tagname,
-                                          GMarkupParser *parser,
-                                          gpointer      *data)
+gtk_icon_view_buildable_custom_tag_start (GtkBuildable       *buildable,
+                                          GtkBuilder         *builder,
+                                          GObject            *child,
+                                          const gchar        *tagname,
+                                          GtkBuildableParser *parser,
+                                          gpointer           *data)
 {
   if (parent_buildable_iface->custom_tag_start (buildable, builder, child,
                                                 tagname, parser, data))
@@ -6866,7 +6877,7 @@ gtk_icon_view_buildable_custom_tag_end (GtkBuildable *buildable,
                                         GtkBuilder   *builder,
                                         GObject      *child,
                                         const gchar  *tagname,
-                                        gpointer     *data)
+                                        gpointer      data)
 {
   if (!_gtk_cell_layout_buildable_custom_tag_end (buildable, builder,
                                                   child, tagname, data))

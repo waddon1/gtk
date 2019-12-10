@@ -27,6 +27,7 @@
 
 #include <glib-object.h>
 #include <gdk/gdk.h>
+#include <gdk/gdk-private.h>
 
 #include "gtkcsstypesprivate.h"
 #include "gtktexthandleprivate.h"
@@ -39,12 +40,12 @@ G_BEGIN_DECLS
 
 #define OPPOSITE_ORIENTATION(_orientation) (1 - (_orientation))
 
-#ifdef G_DISABLE_CAST_CHECKS
-/* This is true for debug no and minimum */
+#ifndef G_ENABLE_CONSISTENCY_CHECKS
+/* This is true for buildtypes release and debugoptimized */
 #define gtk_internal_return_if_fail(__expr) G_STMT_START{ (void)0; }G_STMT_END
 #define gtk_internal_return_val_if_fail(__expr, __val) G_STMT_START{ (void)0; }G_STMT_END
 #else
-/* This is true for debug yes */
+/* This is true for debug builds */
 #define gtk_internal_return_if_fail(__expr) g_return_if_fail(__expr)
 #define gtk_internal_return_val_if_fail(__expr, __val) g_return_val_if_fail(__expr, __val)
 #endif
@@ -93,23 +94,9 @@ void             gtk_propagate_event_internal  (GtkWidget       *widget,
                                                 GdkEvent        *event,
                                                 GtkWidget       *topmost);
 
-gboolean         gtk_widget_translate_coordinatesf (GtkWidget  *src_widget,
-                                                    GtkWidget  *dest_widget,
-                                                    double      src_x,
-                                                    double      src_y,
-                                                    double     *dest_x,
-                                                    double     *dest_y);
-
-GtkWidget *     _gtk_toplevel_pick (GtkWindow *toplevel,
-                                    gdouble    x,
-                                    gdouble    y,
-                                    gdouble   *x_out,
-                                    gdouble   *y_out);
-
 gdouble _gtk_get_slowdown (void);
 void    _gtk_set_slowdown (gdouble slowdown_factor);
 
-gboolean gtk_should_use_portal (void);
 char *gtk_get_portal_request_path (GDBusConnection  *connection,
                                    char            **token);
 char *gtk_get_portal_session_path (GDBusConnection  *connection,

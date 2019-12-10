@@ -21,12 +21,14 @@
 #include "gtkshortcutsshortcutprivate.h"
 
 #include "gtkimage.h"
+#include "gtkbox.h"
 #include "gtkintl.h"
 #include "gtklabel.h"
 #include "gtkprivate.h"
 #include "gtkshortcutlabel.h"
 #include "gtkshortcutswindowprivate.h"
 #include "gtksizegroup.h"
+#include "gtkstylecontext.h"
 #include "gtktypebuiltins.h"
 
 /**
@@ -517,13 +519,18 @@ gtk_shortcuts_shortcut_snapshot (GtkWidget   *widget,
 }
 
 static void
-gtk_shortcuts_shortcut_size_allocate (GtkWidget           *widget,
-                                      const GtkAllocation *allocation,
-                                      int                  baseline)
+gtk_shortcuts_shortcut_size_allocate (GtkWidget *widget,
+                                      int        width,
+                                      int        height,
+                                      int        baseline)
 {
-  GTK_WIDGET_CLASS (gtk_shortcuts_shortcut_parent_class)->size_allocate (widget, allocation, baseline);
+  GTK_WIDGET_CLASS (gtk_shortcuts_shortcut_parent_class)->size_allocate (widget, width, height, baseline);
 
-  gtk_widget_size_allocate (GTK_WIDGET (GTK_SHORTCUTS_SHORTCUT (widget)->box), allocation, -1);
+  gtk_widget_size_allocate (GTK_WIDGET (GTK_SHORTCUTS_SHORTCUT (widget)->box),
+                            &(GtkAllocation) {
+                              0, 0,
+                              width, height
+                            }, -1);
 }
 
 static void
@@ -719,8 +726,6 @@ gtk_shortcuts_shortcut_class_init (GtkShortcutsShortcutClass *klass)
 static void
 gtk_shortcuts_shortcut_init (GtkShortcutsShortcut *self)
 {
-  gtk_widget_set_has_surface (GTK_WIDGET (self), FALSE);
-
   self->box = g_object_new (GTK_TYPE_BOX,
                             "orientation", GTK_ORIENTATION_HORIZONTAL,
                             "spacing", 12,

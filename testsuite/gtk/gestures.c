@@ -26,16 +26,18 @@ point_press (PointState *point,
   GdkDisplay *display;
   GdkDevice *device;
   GdkSeat *seat;
+  GdkSurface *surface;
   GdkEvent *ev;
 
   display = gtk_widget_get_display (widget);
   seat = gdk_display_get_default_seat (display);
   device = gdk_seat_get_pointer (seat);
+  surface = gtk_native_get_surface (gtk_widget_get_native (widget));
 
   if (point == &mouse_state)
     {
       ev = gdk_event_new (GDK_BUTTON_PRESS);
-      ev->any.surface = g_object_ref (gtk_widget_get_surface (widget));
+      ev->any.surface = g_object_ref (surface);
       ev->button.time = GDK_CURRENT_TIME;
       ev->button.x = point->x;
       ev->button.y = point->y;
@@ -47,7 +49,7 @@ point_press (PointState *point,
   else
     {
       ev = gdk_event_new (GDK_TOUCH_BEGIN);
-      ev->any.surface = g_object_ref (gtk_widget_get_surface (widget));
+      ev->any.surface = g_object_ref (surface);
       ev->touch.time = GDK_CURRENT_TIME;
       ev->touch.x = point->x;
       ev->touch.y = point->y;
@@ -75,11 +77,13 @@ point_update (PointState *point,
   GdkDisplay *display;
   GdkDevice *device;
   GdkSeat *seat;
+  GdkSurface *surface;
   GdkEvent *ev;
 
   display = gtk_widget_get_display (widget);
   seat = gdk_display_get_default_seat (display);
   device = gdk_seat_get_pointer (seat);
+  surface = gtk_native_get_surface (gtk_widget_get_native (widget));
 
   point->x = x;
   point->y = y;
@@ -87,7 +91,7 @@ point_update (PointState *point,
   if (point == &mouse_state)
     {
       ev = gdk_event_new (GDK_MOTION_NOTIFY);
-      ev->any.surface = g_object_ref (gtk_widget_get_surface (widget));
+      ev->any.surface = g_object_ref (surface);
       ev->button.time = GDK_CURRENT_TIME;
       ev->motion.x = x;
       ev->motion.y = y;
@@ -99,7 +103,7 @@ point_update (PointState *point,
         return;
 
       ev = gdk_event_new (GDK_TOUCH_UPDATE);
-      ev->any.surface = g_object_ref (gtk_widget_get_surface (widget));
+      ev->any.surface = g_object_ref (surface);
       ev->touch.time = GDK_CURRENT_TIME;
       ev->touch.x = x;
       ev->touch.y = y;
@@ -124,6 +128,7 @@ point_release (PointState *point,
   GdkDisplay *display;
   GdkDevice *device;
   GdkSeat *seat;
+  GdkSurface *surface;
   GdkEvent *ev;
 
   if (point->widget == NULL)
@@ -132,6 +137,7 @@ point_release (PointState *point,
   display = gtk_widget_get_display (point->widget);
   seat = gdk_display_get_default_seat (display);
   device = gdk_seat_get_pointer (seat);
+  surface = gtk_native_get_surface (gtk_widget_get_native (point->widget));
 
   if (!point->widget)
     return;
@@ -142,7 +148,7 @@ point_release (PointState *point,
         return;
 
       ev = gdk_event_new (GDK_BUTTON_RELEASE);
-      ev->any.surface = g_object_ref (gtk_widget_get_surface (point->widget));
+      ev->any.surface = g_object_ref (surface);
       ev->button.time = GDK_CURRENT_TIME;
       ev->button.x = point->x;
       ev->button.y = point->y;
@@ -153,7 +159,7 @@ point_release (PointState *point,
   else
     {
       ev = gdk_event_new (GDK_TOUCH_END);
-      ev->any.surface = g_object_ref (gtk_widget_get_surface (point->widget));
+      ev->any.surface = g_object_ref (surface);
       ev->touch.time = GDK_CURRENT_TIME;
       ev->touch.x = point->x;
       ev->touch.y = point->y;
@@ -198,16 +204,20 @@ state_nick (GtkEventSequenceState state)
 }
 
 typedef struct {
+  GtkEventController *controller;
   GString *str;
   gboolean exit;
 } LegacyData;
 
 static gboolean
-legacy_cb (GtkWidget *w, GdkEvent *button, gpointer data)
+legacy_cb (GtkEventControllerLegacy *c, GdkEvent *button, gpointer data)
 {
   if (gdk_event_get_event_type (button) == GDK_BUTTON_PRESS)
     {
       LegacyData *ld = data;
+      GtkWidget *w;
+
+      w = gtk_event_controller_get_widget (ld->controller);
 
       if (ld->str->len > 0)
         g_string_append (ld->str, ", ");
@@ -331,7 +341,7 @@ add_gesture (GtkWidget *w, const gchar *name, GtkPropagationPhase phase, GString
   data->str = str;
   data->state = state;
 
-  g = gtk_gesture_multi_press_new ();
+  g = gtk_gesture_click_new ();
   gtk_gesture_single_set_touch_only (GTK_GESTURE_SINGLE (g), FALSE);
   gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (g), 1);
   gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (g), phase);
@@ -377,9 +387,13 @@ add_legacy (GtkWidget *w, GString *str, gboolean exit)
   LegacyData *data;
 
   data = g_new (LegacyData, 1);
+  data->controller = gtk_event_controller_legacy_new ();
   data->str = str;
   data->exit = exit;
-  g_signal_connect (w, "event", G_CALLBACK (legacy_cb), data);
+
+  gtk_event_controller_set_propagation_phase (data->controller, GTK_PHASE_BUBBLE);
+  gtk_widget_add_controller (w, data->controller);
+  g_signal_connect (data->controller, "event", G_CALLBACK (legacy_cb), data);
 }
 
 static void
@@ -457,6 +471,10 @@ test_mixed (void)
 
   str = g_string_new ("");
 
+  add_legacy (A, str, GDK_EVENT_PROPAGATE);
+  add_legacy (B, str, GDK_EVENT_PROPAGATE);
+  add_legacy (C, str, GDK_EVENT_PROPAGATE);
+
   add_gesture (A, "a1", GTK_PHASE_CAPTURE, str, GTK_EVENT_SEQUENCE_NONE);
   add_gesture (B, "b1", GTK_PHASE_CAPTURE, str, GTK_EVENT_SEQUENCE_NONE);
   add_gesture (C, "c1", GTK_PHASE_CAPTURE, str, GTK_EVENT_SEQUENCE_NONE);
@@ -466,10 +484,6 @@ test_mixed (void)
   add_gesture (A, "a3", GTK_PHASE_BUBBLE, str, GTK_EVENT_SEQUENCE_NONE);
   add_gesture (B, "b3", GTK_PHASE_BUBBLE, str, GTK_EVENT_SEQUENCE_NONE);
   add_gesture (C, "c3", GTK_PHASE_BUBBLE, str, GTK_EVENT_SEQUENCE_NONE);
-
-  add_legacy (A, str, GDK_EVENT_PROPAGATE);
-  add_legacy (B, str, GDK_EVENT_PROPAGATE);
-  add_legacy (C, str, GDK_EVENT_PROPAGATE);
 
   gtk_widget_get_allocation (A, &allocation);
 
@@ -516,6 +530,10 @@ test_early_exit (void)
 
   str = g_string_new ("");
 
+  add_legacy (A, str, GDK_EVENT_PROPAGATE);
+  add_legacy (B, str, GDK_EVENT_STOP);
+  add_legacy (C, str, GDK_EVENT_PROPAGATE);
+
   add_gesture (A, "a1", GTK_PHASE_CAPTURE, str, GTK_EVENT_SEQUENCE_NONE);
   add_gesture (B, "b1", GTK_PHASE_CAPTURE, str, GTK_EVENT_SEQUENCE_NONE);
   add_gesture (C, "c1", GTK_PHASE_CAPTURE, str, GTK_EVENT_SEQUENCE_NONE);
@@ -523,10 +541,6 @@ test_early_exit (void)
   add_gesture (A, "a3", GTK_PHASE_BUBBLE, str, GTK_EVENT_SEQUENCE_NONE);
   add_gesture (B, "b3", GTK_PHASE_BUBBLE, str, GTK_EVENT_SEQUENCE_NONE);
   add_gesture (C, "c3", GTK_PHASE_BUBBLE, str, GTK_EVENT_SEQUENCE_NONE);
-
-  add_legacy (A, str, GDK_EVENT_PROPAGATE);
-  add_legacy (B, str, GDK_EVENT_STOP);
-  add_legacy (C, str, GDK_EVENT_PROPAGATE);
 
   gtk_widget_get_allocation (A, &allocation);
 

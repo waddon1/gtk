@@ -32,7 +32,7 @@
 #include "gtkeventcontrollerscroll.h"
 #include "gtkgesturedrag.h"
 #include "gtkgesturelongpressprivate.h"
-#include "gtkgesturemultipress.h"
+#include "gtkgestureclick.h"
 #include "gtkgizmoprivate.h"
 #include "gtkintl.h"
 #include "gtkmarshalers.h"
@@ -40,7 +40,6 @@
 #include "gtkprivate.h"
 #include "gtkscale.h"
 #include "gtktypebuiltins.h"
-#include "gtkwindow.h"
 #include "gtkeventcontrollerkey.h"
 
 #include "a11y/gtkrangeaccessible.h"
@@ -70,6 +69,7 @@
 
 typedef struct _GtkRangeStepTimer GtkRangeStepTimer;
 
+typedef struct _GtkRangePrivate       GtkRangePrivate;
 struct _GtkRangePrivate
 {
   GtkWidget *grab_location;   /* "grabbed" mouse location, NULL for no grab */
@@ -112,7 +112,6 @@ struct _GtkRangePrivate
   /* Whether dragging is ongoing */
   guint in_drag                : 1;
 
-  GtkGesture *multipress_gesture;
   GtkGesture *drag_gesture;
 
   GtkScrollType autoscroll_mode;
@@ -157,17 +156,18 @@ static void gtk_range_measure        (GtkWidget      *widget,
                                       int            *natural,
                                       int            *minimum_baseline,
                                       int            *natural_baseline);
-static void gtk_range_size_allocate  (GtkWidget           *widget,
-                                      const GtkAllocation *allocation,
-                                      int                  baseline);
+static void gtk_range_size_allocate  (GtkWidget      *widget,
+                                      int             width,
+                                      int             height,
+                                      int             baseline);
 static void gtk_range_unmap          (GtkWidget        *widget);
 
-static void gtk_range_multipress_gesture_pressed  (GtkGestureMultiPress *gesture,
+static void gtk_range_click_gesture_pressed  (GtkGestureClick *gesture,
                                                    guint                 n_press,
                                                    gdouble               x,
                                                    gdouble               y,
                                                    GtkRange             *range);
-static void gtk_range_multipress_gesture_released (GtkGestureMultiPress *gesture,
+static void gtk_range_click_gesture_released (GtkGestureClick *gesture,
                                                    guint                 n_press,
                                                    gdouble               x,
                                                    gdouble               y,
@@ -231,12 +231,13 @@ static void          gtk_range_measure_trough           (GtkGizmo       *gizmo,
                                                          gint           *minimum_baseline,
                                                          gint           *natural_baseline);
 static void          gtk_range_allocate_trough          (GtkGizmo            *gizmo,
-                                                         const GtkAllocation *allocation,
+                                                         int                  width,
+                                                         int                  height,
                                                          int                  baseline);
-static gboolean      gtk_range_render_trough            (GtkGizmo     *gizmo,
+static void          gtk_range_render_trough            (GtkGizmo     *gizmo,
                                                          GtkSnapshot  *snapshot);
 
-static void          gtk_range_scroll_controller_scroll (GtkEventControllerScroll *scroll,
+static gboolean      gtk_range_scroll_controller_scroll (GtkEventControllerScroll *scroll,
                                                          gdouble                   dx,
                                                          gdouble                   dy,
                                                          GtkRange                 *range);
@@ -532,8 +533,6 @@ gtk_range_init (GtkRange *range)
   GtkGesture *gesture;
   GtkEventController *controller;
 
-  gtk_widget_set_has_surface (GTK_WIDGET (range), FALSE);
-
   priv->orientation = GTK_ORIENTATION_HORIZONTAL;
   priv->adjustment = NULL;
   priv->inverted = FALSE;
@@ -549,16 +548,17 @@ gtk_range_init (GtkRange *range)
   priv->trough_widget = gtk_gizmo_new ("trough",
                                        gtk_range_measure_trough,
                                        gtk_range_allocate_trough,
-                                       gtk_range_render_trough);
+                                       gtk_range_render_trough,
+                                       NULL);
 
   gtk_widget_set_parent (priv->trough_widget, GTK_WIDGET (range));
 
-  priv->slider_widget = gtk_gizmo_new ("slider", NULL, NULL, NULL);
+  priv->slider_widget = gtk_gizmo_new ("slider", NULL, NULL, NULL, NULL);
   gtk_widget_set_parent (priv->slider_widget, priv->trough_widget);
 
   /* Note: Order is important here.
    * The ::drag-begin handler relies on the state set up by the
-   * multipress ::pressed handler. Gestures are handling events
+   * click ::pressed handler. Gestures are handling events
    * in the oppposite order in which they are added to their
    * widget.
    */
@@ -570,17 +570,17 @@ gtk_range_init (GtkRange *range)
                     G_CALLBACK (gtk_range_drag_gesture_update), range);
   gtk_widget_add_controller (GTK_WIDGET (range), GTK_EVENT_CONTROLLER (priv->drag_gesture));
 
-  priv->multipress_gesture = gtk_gesture_multi_press_new ();
-  gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (priv->multipress_gesture), 0);
-  g_signal_connect (priv->multipress_gesture, "pressed",
-                    G_CALLBACK (gtk_range_multipress_gesture_pressed), range);
-  g_signal_connect (priv->multipress_gesture, "released",
-                    G_CALLBACK (gtk_range_multipress_gesture_released), range);
-  gtk_widget_add_controller (GTK_WIDGET (range), GTK_EVENT_CONTROLLER (priv->multipress_gesture));
-  gtk_gesture_group (priv->drag_gesture, priv->multipress_gesture);
+  gesture = gtk_gesture_click_new ();
+  gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (gesture), 0);
+  g_signal_connect (gesture, "pressed",
+                    G_CALLBACK (gtk_range_click_gesture_pressed), range);
+  g_signal_connect (gesture, "released",
+                    G_CALLBACK (gtk_range_click_gesture_released), range);
+  gtk_widget_add_controller (GTK_WIDGET (range), GTK_EVENT_CONTROLLER (gesture));
+  gtk_gesture_group (priv->drag_gesture, gesture);
 
   gesture = gtk_gesture_long_press_new ();
-  g_object_set (gesture, "delay-factor", 2.0, NULL);
+  gtk_gesture_long_press_set_delay_factor (GTK_GESTURE_LONG_PRESS (gesture), 2.0);
   g_signal_connect (gesture, "pressed",
                     G_CALLBACK (gtk_range_long_press_gesture_pressed), range);
   gtk_widget_add_controller (GTK_WIDGET (range), GTK_EVENT_CONTROLLER (gesture));
@@ -781,7 +781,7 @@ gtk_range_set_inverted (GtkRange *range,
       update_fill_position (range);
       update_highlight_position (range);
 
-      gtk_widget_queue_resize (GTK_WIDGET (range));
+      gtk_widget_queue_resize (priv->trough_widget);
 
       g_object_notify_by_pspec (G_OBJECT (range), properties[PROP_INVERTED]);
     }
@@ -920,14 +920,19 @@ gtk_range_get_range_rect (GtkRange     *range,
   g_return_if_fail (GTK_IS_RANGE (range));
   g_return_if_fail (range_rect != NULL);
 
-  gtk_widget_compute_bounds (priv->trough_widget, GTK_WIDGET (range), &r);
-
-  *range_rect = (GdkRectangle) {
-    floorf (r.origin.x),
-    floorf (r.origin.y),
-    ceilf (r.size.width),
-    ceilf (r.size.height),
-  };
+  if (!gtk_widget_compute_bounds (priv->trough_widget, GTK_WIDGET (range), &r))
+    {
+      *range_rect = (GdkRectangle) { 0, 0, 0, 0 };
+    }
+  else
+    {
+      *range_rect = (GdkRectangle) {
+        floorf (r.origin.x),
+        floorf (r.origin.y),
+        ceilf (r.size.width),
+        ceilf (r.size.height),
+      };
+    }
 }
 
 /**
@@ -953,7 +958,14 @@ gtk_range_get_slider_range (GtkRange *range,
 
   g_return_if_fail (GTK_IS_RANGE (range));
 
-  gtk_widget_compute_bounds (priv->slider_widget, GTK_WIDGET (range), &slider_bounds);
+  if (!gtk_widget_compute_bounds (priv->slider_widget, GTK_WIDGET (range), &slider_bounds))
+    {
+      if (slider_start)
+        *slider_start = 0;
+      if (slider_end)
+        *slider_end = 0;
+      return;
+    }
 
   if (priv->orientation == GTK_ORIENTATION_VERTICAL)
     {
@@ -1110,14 +1122,13 @@ gtk_range_set_show_fill_level (GtkRange *range,
 
   if (show_fill_level)
     {
-      priv->fill_widget = gtk_gizmo_new ("fill", NULL, NULL, NULL);
+      priv->fill_widget = gtk_gizmo_new ("fill", NULL, NULL, NULL, NULL);
       gtk_widget_insert_after (priv->fill_widget, priv->trough_widget, NULL);
       update_fill_position (range);
     }
   else
     {
-      gtk_widget_unparent (priv->fill_widget);
-      priv->fill_widget = NULL;
+      g_clear_pointer (&priv->fill_widget, gtk_widget_unparent);
     }
 
   g_object_notify_by_pspec (G_OBJECT (range), properties[PROP_SHOW_FILL_LEVEL]);
@@ -1288,15 +1299,10 @@ gtk_range_finalize (GObject *object)
   GtkRange *range = GTK_RANGE (object);
   GtkRangePrivate *priv = gtk_range_get_instance_private (range);
 
-  gtk_widget_unparent (priv->slider_widget);
-
-  if (priv->fill_widget)
-    gtk_widget_unparent (priv->fill_widget);
-
-  if (priv->highlight_widget)
-    gtk_widget_unparent (priv->highlight_widget);
-
-  gtk_widget_unparent (priv->trough_widget);
+  g_clear_pointer (&priv->slider_widget, gtk_widget_unparent);
+  g_clear_pointer (&priv->fill_widget, gtk_widget_unparent);
+  g_clear_pointer (&priv->highlight_widget, gtk_widget_unparent);
+  g_clear_pointer (&priv->trough_widget, gtk_widget_unparent);
 
   G_OBJECT_CLASS (gtk_range_parent_class)->finalize (object);
 }
@@ -1375,23 +1381,13 @@ gtk_range_measure (GtkWidget      *widget,
       *minimum += border.top + border.bottom;
       *natural += border.top + border.bottom;
     }
-
-  if (GTK_RANGE_GET_CLASS (range)->get_range_size_request)
-    {
-      gint min, nat;
-
-      GTK_RANGE_GET_CLASS (range)->get_range_size_request (range, orientation,
-                                                           &min, &nat);
-
-      *minimum = MAX (*minimum, min);
-      *natural = MAX (*natural, nat);
-    }
 }
 
 static void
-gtk_range_allocate_trough (GtkGizmo            *gizmo,
-                           const GtkAllocation *allocation,
-                           int                  baseline)
+gtk_range_allocate_trough (GtkGizmo *gizmo,
+                           int       width,
+                           int       height,
+                           int       baseline)
 {
   GtkWidget *widget = gtk_widget_get_parent (GTK_WIDGET (gizmo));
   GtkRange *range = GTK_RANGE (widget);
@@ -1424,7 +1420,7 @@ gtk_range_allocate_trough (GtkGizmo            *gizmo,
       double level, fill;
       GtkAllocation fill_alloc;
 
-      fill_alloc = *allocation;
+      fill_alloc = (GtkAllocation) {0, 0, width, height};
 
       level = CLAMP (priv->fill_level, lower, upper - page_size);
 
@@ -1435,14 +1431,14 @@ gtk_range_allocate_trough (GtkGizmo            *gizmo,
           fill_alloc.width *= fill;
 
           if (should_invert (range))
-            fill_alloc.x += allocation->width - fill_alloc.width;
+            fill_alloc.x += width - fill_alloc.width;
         }
       else
         {
           fill_alloc.height *= fill;
 
           if (should_invert (range))
-            fill_alloc.y += allocation->height - fill_alloc.height;
+            fill_alloc.y += height - fill_alloc.height;
         }
 
       gtk_widget_size_allocate (priv->fill_widget, &fill_alloc, -1);
@@ -1460,27 +1456,27 @@ gtk_range_allocate_trough (GtkGizmo            *gizmo,
 
       if (priv->orientation == GTK_ORIENTATION_HORIZONTAL)
         {
-          highlight_alloc.y = allocation->y;
-          highlight_alloc.height = allocation->height;
+          highlight_alloc.y = 0;
+          highlight_alloc.height = height;
 
           if (!should_invert (range))
-            highlight_alloc.x = allocation->x;
+            highlight_alloc.x = 0;
           else
-            highlight_alloc.x = allocation->x + (allocation->width * (1 - value));
+            highlight_alloc.x = (width * (1 - value));
 
-          highlight_alloc.width = MAX (min, allocation->width * value);
+          highlight_alloc.width = MAX (min, width * value);
         }
       else
         {
-          highlight_alloc.x = allocation->x;
-          highlight_alloc.width = allocation->width;
+          highlight_alloc.x = 0;
+          highlight_alloc.width = width;
 
           if (!should_invert (range))
-            highlight_alloc.y = allocation->y;
+            highlight_alloc.y = 0;
           else
-            highlight_alloc.y = allocation->y + (allocation->height * (1 - value));
+            highlight_alloc.y = (height * (1 - value));
 
-          highlight_alloc.height = MAX (min, allocation->height* value);
+          highlight_alloc.height = MAX (min, height * value);
         }
 
       gtk_widget_size_allocate (priv->highlight_widget, &highlight_alloc, -1);
@@ -1492,16 +1488,17 @@ gtk_range_allocate_trough (GtkGizmo            *gizmo,
  * give space to border over dimensions in one direction.
  */
 static void
-clamp_dimensions (const GtkAllocation *allocation,
-                  int                 *width,
-                  int                 *height,
-                  GtkBorder           *border,
-                  gboolean             border_expands_horizontally)
+clamp_dimensions (int        range_width,
+                  int        range_height,
+                  int       *width,
+                  int       *height,
+                  GtkBorder *border,
+                  gboolean   border_expands_horizontally)
 {
   gint extra, shortage;
 
   /* Width */
-  extra = allocation->width - border->left - border->right - *width;
+  extra = range_width - border->left - border->right - *width;
   if (extra > 0)
     {
       if (border_expands_horizontally)
@@ -1516,10 +1513,10 @@ clamp_dimensions (const GtkAllocation *allocation,
     }
   
   /* See if we can fit rect, if not kill the border */
-  shortage = *width - allocation->width;
+  shortage = *width - range_width;
   if (shortage > 0)
     {
-      *width = allocation->width;
+      *width = range_width;
       /* lose the border */
       border->left = 0;
       border->right = 0;
@@ -1527,7 +1524,7 @@ clamp_dimensions (const GtkAllocation *allocation,
   else
     {
       /* See if we can fit rect with borders */
-      shortage = *width + border->left + border->right - allocation->width;
+      shortage = *width + border->left + border->right - range_width;
       if (shortage > 0)
         {
           /* Shrink borders */
@@ -1537,7 +1534,7 @@ clamp_dimensions (const GtkAllocation *allocation,
     }
 
   /* Height */
-  extra = allocation->height - border->top - border->bottom - *height;
+  extra = range_height - border->top - border->bottom - *height;
   if (extra > 0)
     {
       if (border_expands_horizontally)
@@ -1553,10 +1550,10 @@ clamp_dimensions (const GtkAllocation *allocation,
     }
   
   /* See if we can fit rect, if not kill the border */
-  shortage = *height - allocation->height;
+  shortage = *height - range_height;
   if (shortage > 0)
     {
-      *height = allocation->height;
+      *height = range_height;
       /* lose the border */
       border->top = 0;
       border->bottom = 0;
@@ -1564,7 +1561,7 @@ clamp_dimensions (const GtkAllocation *allocation,
   else
     {
       /* See if we can fit rect with borders */
-      shortage = *height + border->top + border->bottom - allocation->height;
+      shortage = *height + border->top + border->bottom - range_height;
       if (shortage > 0)
         {
           /* Shrink borders */
@@ -1575,9 +1572,10 @@ clamp_dimensions (const GtkAllocation *allocation,
 }
 
 static void
-gtk_range_size_allocate (GtkWidget           *widget,
-                         const GtkAllocation *allocation,
-                         int                  baseline)
+gtk_range_size_allocate (GtkWidget *widget,
+                         int        width,
+                         int        height,
+                         int        baseline)
 {
   GtkRange *range = GTK_RANGE (widget);
   GtkRangePrivate *priv = gtk_range_get_instance_private (range);
@@ -1598,9 +1596,9 @@ gtk_range_size_allocate (GtkWidget           *widget,
                       NULL, NULL);
 
   if (priv->orientation == GTK_ORIENTATION_VERTICAL)
-    clamp_dimensions (allocation, &box_min_width, &box_min_height, &border, TRUE);
+    clamp_dimensions (width, height, &box_min_width, &box_min_height, &border, TRUE);
   else
-    clamp_dimensions (allocation, &box_min_width, &box_min_height, &border, FALSE);
+    clamp_dimensions (width, height, &box_min_width, &box_min_height, &border, FALSE);
 
   box_alloc.x = border.left;
   box_alloc.y = border.top;
@@ -1608,10 +1606,6 @@ gtk_range_size_allocate (GtkWidget           *widget,
   box_alloc.height = box_min_height;
 
   gtk_widget_size_allocate (priv->trough_widget, &box_alloc, -1);
-
-  /* TODO: we should compute a proper clip from get_range_border(),
-   * but this will at least give us outset shadows.
-   */
 }
 
 static void
@@ -1622,28 +1616,6 @@ gtk_range_unmap (GtkWidget *widget)
   stop_scrolling (range);
 
   GTK_WIDGET_CLASS (gtk_range_parent_class)->unmap (widget);
-}
-
-static void
-update_slider_state (GtkRange *range)
-{
-  GtkRangePrivate *priv = gtk_range_get_instance_private (range);
-
-  if (priv->grab_location == priv->slider_widget)
-    gtk_widget_set_state_flags (priv->slider_widget, GTK_STATE_FLAG_ACTIVE, FALSE);
-  else
-    gtk_widget_unset_state_flags (priv->slider_widget, GTK_STATE_FLAG_ACTIVE);
-}
-
-static void
-update_trough_state (GtkRange *range)
-{
-  GtkRangePrivate *priv = gtk_range_get_instance_private (range);
-
-  if (priv->grab_location == priv->trough_widget)
-    gtk_widget_set_state_flags (priv->trough_widget, GTK_STATE_FLAG_ACTIVE, FALSE);
-  else
-    gtk_widget_unset_state_flags (priv->trough_widget, GTK_STATE_FLAG_ACTIVE);
 }
 
 static void
@@ -1658,7 +1630,7 @@ gtk_range_direction_changed (GtkWidget        *widget,
   GTK_WIDGET_CLASS (gtk_range_parent_class)->direction_changed (widget, previous_direction);
 }
 
-static gboolean
+static void
 gtk_range_render_trough (GtkGizmo    *gizmo,
                          GtkSnapshot *snapshot)
 {
@@ -1671,7 +1643,6 @@ gtk_range_render_trough (GtkGizmo    *gizmo,
    */
   if (GTK_IS_COLOR_SCALE (widget))
     gtk_color_scale_snapshot_trough (GTK_COLOR_SCALE (widget), snapshot,
-                                     0, 0,
                                      gtk_widget_get_width (GTK_WIDGET (gizmo)),
                                      gtk_widget_get_height (GTK_WIDGET (gizmo)));
 
@@ -1684,8 +1655,6 @@ gtk_range_render_trough (GtkGizmo    *gizmo,
     gtk_widget_snapshot_child (GTK_WIDGET (gizmo), priv->highlight_widget, snapshot);
 
   gtk_widget_snapshot_child (GTK_WIDGET (gizmo), priv->slider_widget, snapshot);
-
-  return gtk_widget_has_visible_focus (widget);
 }
 
 static void
@@ -1703,9 +1672,6 @@ range_grab_add (GtkRange  *range,
    * is the only widget receiving the pointer events.
    */
   priv->grab_location = location;
-
-  update_trough_state (range);
-  update_slider_state (range);
 
   gtk_style_context_add_class (context, "dragging");
 }
@@ -1740,8 +1706,6 @@ range_grab_remove (GtkRange *range)
 
   priv->grab_location = NULL;
 
-  update_trough_state (range);
-  update_slider_state (range);
   update_zoom_state (range, FALSE);
 
   gtk_style_context_remove_class (context, "dragging");
@@ -1778,7 +1742,8 @@ coord_to_value (GtkRange *range,
   gint    slider_length;
   graphene_rect_t slider_bounds;
 
-  gtk_widget_compute_bounds (priv->slider_widget, priv->slider_widget, &slider_bounds);
+  if (!gtk_widget_compute_bounds (priv->slider_widget, priv->slider_widget, &slider_bounds))
+    graphene_rect_init (&slider_bounds, 0, 0, gtk_widget_get_width (priv->trough_widget), gtk_widget_get_height (priv->trough_widget));
 
   if (priv->orientation == GTK_ORIENTATION_HORIZONTAL)
     {
@@ -1837,7 +1802,8 @@ gtk_range_key_controller_key_pressed (GtkEventControllerKey *controller,
     {
       graphene_rect_t slider_bounds;
 
-      gtk_widget_compute_bounds (priv->slider_widget, priv->trough_widget, &slider_bounds);
+      if (!gtk_widget_compute_bounds (priv->slider_widget, priv->trough_widget, &slider_bounds))
+        return GDK_EVENT_STOP;
 
       if (priv->orientation == GTK_ORIENTATION_VERTICAL)
         priv->slide_initial_slider_position = slider_bounds.origin.y;
@@ -1883,7 +1849,7 @@ gtk_range_long_press_gesture_pressed (GtkGestureLongPress *gesture,
   GtkRangePrivate *priv = gtk_range_get_instance_private (range);
   GtkWidget *mouse_location;
 
-  mouse_location = gtk_widget_pick (GTK_WIDGET (range), x, y);
+  mouse_location = gtk_widget_pick (GTK_WIDGET (range), x, y, GTK_PICK_DEFAULT);
 
   if (mouse_location == priv->slider_widget && !priv->zoom)
     {
@@ -1893,11 +1859,11 @@ gtk_range_long_press_gesture_pressed (GtkGestureLongPress *gesture,
 }
 
 static void
-gtk_range_multipress_gesture_pressed (GtkGestureMultiPress *gesture,
-                                      guint                 n_press,
-                                      gdouble               x,
-                                      gdouble               y,
-                                      GtkRange             *range)
+gtk_range_click_gesture_pressed (GtkGestureClick *gesture,
+                                 guint            n_press,
+                                 gdouble          x,
+                                 gdouble          y,
+                                 GtkRange        *range)
 {
   GtkWidget *widget = GTK_WIDGET (range);
   GtkRangePrivate *priv = gtk_range_get_instance_private (range);
@@ -1910,7 +1876,6 @@ gtk_range_multipress_gesture_pressed (GtkGestureMultiPress *gesture,
   guint button;
   GdkModifierType state_mask;
   GtkWidget *mouse_location;
-  graphene_rect_t slider_bounds;
 
   if (!gtk_widget_has_focus (widget))
     gtk_widget_grab_focus (widget);
@@ -1924,13 +1889,11 @@ gtk_range_multipress_gesture_pressed (GtkGestureMultiPress *gesture,
   source_device = gdk_event_get_source_device ((GdkEvent *) event);
   source = gdk_device_get_source (source_device);
 
-  gtk_widget_compute_bounds (priv->slider_widget, priv->slider_widget, &slider_bounds);
-
   g_object_get (gtk_widget_get_settings (widget),
                 "gtk-primary-button-warps-slider", &primary_warps,
                 NULL);
 
-  mouse_location = gtk_widget_pick (widget, x, y);
+  mouse_location = gtk_widget_pick (widget, x, y, 0);
 
   /* For the purposes of this function, we ignore fill and highlight and
    * handle them like the trough */
@@ -1943,7 +1906,7 @@ gtk_range_multipress_gesture_pressed (GtkGestureMultiPress *gesture,
     {
       gboolean handled;
 
-      gtk_gesture_set_state (priv->multipress_gesture, GTK_EVENT_SEQUENCE_CLAIMED);
+      gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
       g_signal_emit_by_name (widget, "popup-menu", &handled);
       return;
     }
@@ -1964,13 +1927,15 @@ gtk_range_multipress_gesture_pressed (GtkGestureMultiPress *gesture,
             (!primary_warps && button == GDK_BUTTON_MIDDLE)))
     {
       int slider_range_x, slider_range_y;
+      graphene_rect_t slider_bounds;
 
       gtk_widget_translate_coordinates (priv->trough_widget, widget,
                                         priv->slider_x, priv->slider_y,
                                         &slider_range_x, &slider_range_y);
 
       /* If we aren't fixed, center on the slider. I.e. if this is not a scale... */
-      if (!priv->slider_size_fixed)
+      if (!priv->slider_size_fixed &&
+          gtk_widget_compute_bounds (priv->slider_widget, priv->slider_widget, &slider_bounds))
         {
           slider_range_x += (slider_bounds.size.width  / 2);
           slider_range_y += (slider_bounds.size.height / 2);
@@ -2022,15 +1987,15 @@ gtk_range_multipress_gesture_pressed (GtkGestureMultiPress *gesture,
   if (priv->grab_location == priv->slider_widget);
     /* leave it to ::drag-begin to claim the sequence */
   else if (priv->grab_location != NULL)
-    gtk_gesture_set_state (priv->multipress_gesture, GTK_EVENT_SEQUENCE_CLAIMED);
+    gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
 }
 
 static void
-gtk_range_multipress_gesture_released (GtkGestureMultiPress *gesture,
-                                       guint                 n_press,
-                                       gdouble               x,
-                                       gdouble               y,
-                                       GtkRange             *range)
+gtk_range_click_gesture_released (GtkGestureClick *gesture,
+                                  guint            n_press,
+                                  gdouble          x,
+                                  gdouble          y,
+                                  GtkRange        *range)
 {
   GtkRangePrivate *priv = gtk_range_get_instance_private (range);
 
@@ -2045,6 +2010,7 @@ update_slider_position (GtkRange *range,
                         gint      mouse_y)
 {
   GtkRangePrivate *priv = gtk_range_get_instance_private (range);
+  graphene_rect_t trough_bounds;
   gdouble delta;
   gdouble c;
   gdouble new_value;
@@ -2058,17 +2024,15 @@ update_slider_position (GtkRange *range,
   gtk_widget_translate_coordinates (GTK_WIDGET (range), priv->trough_widget,
                                     mouse_x, mouse_y, &mouse_x, &mouse_y);
 
-  if (priv->zoom)
+  if (priv->zoom &&
+      gtk_widget_compute_bounds (priv->trough_widget, priv->trough_widget, &trough_bounds))
     {
-      graphene_rect_t trough_bounds;
-
-      gtk_widget_compute_bounds (priv->trough_widget, priv->trough_widget, &trough_bounds);
-
       zoom = MIN(1.0, (priv->orientation == GTK_ORIENTATION_VERTICAL ?
                        trough_bounds.size.height : trough_bounds.size.width) /
                        (gtk_adjustment_get_upper (priv->adjustment) -
                         gtk_adjustment_get_lower (priv->adjustment) -
                         gtk_adjustment_get_page_size (priv->adjustment)));
+
       /* the above is ineffective for scales, so just set a zoom factor */
       if (zoom == 1.0)
         zoom = 0.25;
@@ -2080,13 +2044,20 @@ update_slider_position (GtkRange *range,
   if (priv->slide_initial_slider_position == -1)
     {
       graphene_rect_t slider_bounds;
+      double zoom_divisor;
 
-      gtk_widget_compute_bounds (priv->slider_widget, GTK_WIDGET (range), &slider_bounds);
+      if (!gtk_widget_compute_bounds (priv->slider_widget, GTK_WIDGET (range), &slider_bounds))
+        graphene_rect_init (&slider_bounds, 0, 0, 0, 0);
+
+      if (zoom == 1.0)
+        zoom_divisor = 1.0;
+      else
+        zoom_divisor = zoom - 1.0;
 
       if (priv->orientation == GTK_ORIENTATION_VERTICAL)
-        priv->slide_initial_slider_position = (zoom * (mouse_y - priv->slide_initial_coordinate_delta) - slider_bounds.origin.y) / (zoom - 1.0);
+        priv->slide_initial_slider_position = (zoom * (mouse_y - priv->slide_initial_coordinate_delta) - slider_bounds.origin.y) / zoom_divisor;
       else
-        priv->slide_initial_slider_position = (zoom * (mouse_x - priv->slide_initial_coordinate_delta) - slider_bounds.origin.x) / (zoom - 1.0);
+        priv->slide_initial_slider_position = (zoom * (mouse_x - priv->slide_initial_coordinate_delta) - slider_bounds.origin.x) / zoom_divisor;
     }
 
   if (priv->orientation == GTK_ORIENTATION_VERTICAL)
@@ -2228,7 +2199,7 @@ stop_scrolling (GtkRange *range)
   remove_autoscroll (range);
 }
 
-static void
+static gboolean
 gtk_range_scroll_controller_scroll (GtkEventControllerScroll *scroll,
                                     gdouble                   dx,
                                     gdouble                   dy,
@@ -2262,6 +2233,8 @@ gtk_range_scroll_controller_scroll (GtkEventControllerScroll *scroll,
   g_signal_emit (range, signals[CHANGE_VALUE], 0,
                  GTK_SCROLL_JUMP, gtk_adjustment_get_value (priv->adjustment) + delta,
                  &handled);
+
+  return GDK_EVENT_STOP;
 }
 
 static void
@@ -2797,7 +2770,7 @@ initial_timeout (gpointer data)
   GtkRangePrivate *priv = gtk_range_get_instance_private (range);
 
   priv->timer->timeout_id = g_timeout_add (TIMEOUT_REPEAT, second_timeout, range);
-  g_source_set_name_by_id (priv->timer->timeout_id, "[gtk+] second_timeout");
+  g_source_set_name_by_id (priv->timer->timeout_id, "[gtk] second_timeout");
   return G_SOURCE_REMOVE;
 }
 
@@ -2813,7 +2786,7 @@ gtk_range_add_step_timer (GtkRange      *range,
   priv->timer = g_new (GtkRangeStepTimer, 1);
 
   priv->timer->timeout_id = g_timeout_add (TIMEOUT_INITIAL, initial_timeout, range);
-  g_source_set_name_by_id (priv->timer->timeout_id, "[gtk+] initial_timeout");
+  g_source_set_name_by_id (priv->timer->timeout_id, "[gtk] initial_timeout");
   priv->timer->step = step;
 
   gtk_range_scroll (range, priv->timer->step);
@@ -2843,15 +2816,14 @@ _gtk_range_set_has_origin (GtkRange *range,
 
   if (has_origin)
     {
-      priv->highlight_widget = gtk_gizmo_new ("highlight", NULL, NULL, NULL);
+      priv->highlight_widget = gtk_gizmo_new ("highlight", NULL, NULL, NULL, NULL);
       gtk_widget_insert_before (priv->highlight_widget, priv->trough_widget, priv->slider_widget);
 
       update_highlight_position (range);
     }
   else
     {
-      gtk_widget_unparent (priv->highlight_widget);
-      priv->highlight_widget = NULL;
+      g_clear_pointer (&priv->highlight_widget, gtk_widget_unparent);
     }
 }
 
@@ -2948,6 +2920,14 @@ gtk_range_get_slider_widget (GtkRange *range)
   GtkRangePrivate *priv = gtk_range_get_instance_private (range);
 
   return priv->slider_widget;
+}
+
+GtkWidget *
+gtk_range_get_trough_widget (GtkRange *range)
+{
+  GtkRangePrivate *priv = gtk_range_get_instance_private (range);
+
+  return priv->trough_widget;
 }
 
 void

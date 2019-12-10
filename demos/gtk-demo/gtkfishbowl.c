@@ -53,6 +53,7 @@ enum {
    PROP_BENCHMARK,
    PROP_COUNT,
    PROP_FRAMERATE,
+   PROP_FRAMERATE_STRING,
    PROP_UPDATE_DELAY,
    NUM_PROPERTIES
 };
@@ -65,8 +66,6 @@ static void
 gtk_fishbowl_init (GtkFishbowl *fishbowl)
 {
   GtkFishbowlPrivate *priv = gtk_fishbowl_get_instance_private (fishbowl);
-
-  gtk_widget_set_has_surface (GTK_WIDGET (fishbowl), FALSE);
 
   priv->update_delay = G_USEC_PER_SEC;
 }
@@ -128,9 +127,10 @@ gtk_fishbowl_measure (GtkWidget      *widget,
 }
 
 static void
-gtk_fishbowl_size_allocate (GtkWidget           *widget,
-                            const GtkAllocation *allocation,
-                            int                  baseline)
+gtk_fishbowl_size_allocate (GtkWidget *widget,
+                            int        width,
+                            int        height,
+                            int        baseline)
 {
   GtkFishbowl *fishbowl = GTK_FISHBOWL (widget);
   GtkFishbowlPrivate *priv = gtk_fishbowl_get_instance_private (fishbowl);
@@ -147,8 +147,8 @@ gtk_fishbowl_size_allocate (GtkWidget           *widget,
         continue;
 
       gtk_widget_get_preferred_size (child->widget, &child_requisition, NULL);
-      child_allocation.x = allocation->x + round (child->x * (allocation->width - child_requisition.width));
-      child_allocation.y = allocation->y + round (child->y * (allocation->height - child_requisition.height));
+      child_allocation.x = round (child->x * (width - child_requisition.width));
+      child_allocation.y = round (child->y * (height - child_requisition.height));
       child_allocation.width = child_requisition.width;
       child_allocation.height = child_requisition.height;
 
@@ -289,6 +289,14 @@ gtk_fishbowl_get_property (GObject         *object,
       g_value_set_double (value, gtk_fishbowl_get_framerate (fishbowl));
       break;
 
+    case PROP_FRAMERATE_STRING:
+      {
+        char *s = g_strdup_printf ("%.2f", gtk_fishbowl_get_framerate (fishbowl));
+        g_value_set_string (value, s);
+        g_free (s);
+      }
+      break;
+
     case PROP_UPDATE_DELAY:
       g_value_set_int64 (value, gtk_fishbowl_get_update_delay (fishbowl));
       break;
@@ -340,6 +348,13 @@ gtk_fishbowl_class_init (GtkFishbowlClass *klass)
                            "Framerate of this widget in frames per second",
                            0, G_MAXDOUBLE,
                            0,
+                           G_PARAM_READABLE);
+
+  props[PROP_FRAMERATE_STRING] =
+      g_param_spec_string ("framerate-string",
+                           "Framerate as string",
+                           "Framerate as string, with 2 decimals",
+                           NULL,
                            G_PARAM_READABLE);
 
   props[PROP_UPDATE_DELAY] =
@@ -490,7 +505,10 @@ gtk_fishbowl_do_update (GtkFishbowl *fishbowl)
 
   n_frames = end_counter - start_counter;
   priv->framerate = ((double) n_frames) * G_USEC_PER_SEC / (end_timestamp - start_timestamp);
+  priv->framerate = ((int)(priv->framerate * 100))/100.0;
+
   g_object_notify_by_pspec (G_OBJECT (fishbowl), props[PROP_FRAMERATE]);
+  g_object_notify_by_pspec (G_OBJECT (fishbowl), props[PROP_FRAMERATE_STRING]);
 
   if (!priv->benchmark)
     return;

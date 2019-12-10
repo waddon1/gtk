@@ -10,40 +10,58 @@ endif
 tests = [
   ['accel'],
   ['accessible'],
+  ['action'],
   ['adjustment'],
   ['bitmask', ['../../gtk/gtkallocatedbitmask.c'], ['-DGTK_COMPILATION', '-UG_ENABLE_DEBUG']],
   ['builder', [], [], gtk_tests_export_dynamic_ldflag],
   ['builderparser'],
   ['cellarea'],
   ['check-icon-names'],
+  ['constraint-solver', [
+      '../../gtk/gtkconstraintsolver.c',
+      '../../gtk/gtkconstraintexpression.c',
+    ], ['-DGTK_COMPILATION', '-UG_ENABLE_DEBUG']
+  ],
   ['cssprovider'],
+  ['rbtree-crash', ['../../gtk/gtkrbtree.c'], ['-DGTK_COMPILATION', '-UG_ENABLE_DEBUG']],
   ['defaultvalue'],
   ['entry'],
+  ['filterlistmodel'],
+  ['flattenlistmodel'],
   ['firefox-stylecontext'],
   ['floating'],
   ['focus'],
   ['gestures'],
   ['grid'],
+  ['grid-layout'],
   ['gtkmenu'],
   ['icontheme'],
   ['keyhash', ['../../gtk/gtkkeyhash.c', gtkresources, '../../gtk/gtkprivate.c'], gtk_cargs],
   ['listbox'],
   ['main'],
+  ['maplistmodel'],
   ['notify'],
   ['no-gtk-init'],
   ['object'],
   ['objects-finalize'],
   ['papersize'],
-  ['rbtree', ['../../gtk/gtkrbtree.c'], ['-DGTK_COMPILATION', '-UG_ENABLE_DEBUG']],
+  ['popover'],
+  ['propertylookuplistmodel', ['../../gtk/gtkpropertylookuplistmodel.c'], ['-DGTK_COMPILATION', '-UG_ENABLE_DEBUG']],
+  ['rbtree', ['../../gtk/gtktreerbtree.c'], ['-DGTK_COMPILATION', '-UG_ENABLE_DEBUG']],
   ['recentmanager'],
   ['regression-tests'],
   ['scrolledwindow'],
   ['searchbar'],
+  ['singleselection'],
+  ['slicelistmodel'],
+  ['sortlistmodel'],
   ['spinbutton'],
   ['stylecontext'],
   ['templates'],
   ['textbuffer'],
   ['textiter'],
+  ['theme-validate'],
+  ['treelistmodel'],
   ['treemodel', ['treemodel.c', 'liststore.c', 'treestore.c', 'filtermodel.c',
                  'modelrefcount.c', 'sortmodel.c', 'gtktreemodelrefcount.c']],
   ['treepath'],
@@ -111,13 +129,46 @@ if add_languages('cpp', required: false)
   if get_option('install-tests')
     conf = configuration_data()
     conf.set('testexecdir', testexecdir)
-    conf.set('test', 'keywords')
+    conf.set('test', 'autotestkeywords')
     configure_file(input: 'gtk.test.in',
-                   output: 'keywords.test',
+                   output: 'autotestkeywords.test',
                    configuration: conf,
                    install_dir: testdatadir)
   endif
 endif
+
+focus_chain_tests = [
+  # test     direction
+  [ 'basic', 'tab' ],
+  [ 'basic', 'tab-backward' ],
+  [ 'basic', 'left' ],
+  [ 'basic', 'right' ],
+  [ 'focusable-container', 'tab' ],
+  [ 'focusable-container', 'tab-backward' ],
+]
+
+focus_chain = executable(
+  'test-focus-chain',
+  ['test-focus-chain.c'],
+  dependencies: libgtk_dep,
+  install: get_option('install-tests'),
+  install_dir: testexecdir
+)
+
+foreach test : focus_chain_tests
+  test(test[0] + ' ' + test[1], focus_chain,
+       args: [ join_paths(meson.current_source_dir(), 'focus-chain', test[0] + '.ui'),
+               join_paths(meson.current_source_dir(), 'focus-chain', test[0] + '.' + test[1]) ],
+       env: [ 'GIO_USE_VOLUME_MONITOR=unix',
+              'GSETTINGS_BACKEND=memory',
+              'GTK_CSD=1',
+              'G_ENABLE_DIAGNOSTIC=0',
+              'G_TEST_SRCDIR=@0@'.format(meson.current_source_dir()),
+              'G_TEST_BUILDDIR=@0@'.format(meson.current_build_dir())
+             ],
+       suite: [ 'gtk', 'focus' ])
+endforeach
+
 
 if get_option('install-tests')
   foreach t : tests

@@ -185,13 +185,18 @@ gtk_media_controls_measure (GtkWidget      *widget,
 }
 
 static void
-gtk_media_controls_size_allocate (GtkWidget           *widget,
-                                  const GtkAllocation *allocation,
-                                  int                  baseline)
+gtk_media_controls_size_allocate (GtkWidget *widget,
+                                  int        width,
+                                  int        height,
+                                  int        baseline)
 {
   GtkMediaControls *controls = GTK_MEDIA_CONTROLS (widget);
 
-  gtk_widget_size_allocate (controls->box, allocation, baseline);
+  gtk_widget_size_allocate (controls->box,
+                            &(GtkAllocation) {
+                              0, 0,
+                              width, height
+                            }, baseline);
 }
 
 static void
@@ -294,7 +299,6 @@ static void
 gtk_media_controls_init (GtkMediaControls *controls)
 {
   gtk_widget_init_template (GTK_WIDGET (controls));
-  gtk_widget_set_has_surface (GTK_WIDGET (controls), FALSE);
 }
 
 /**
